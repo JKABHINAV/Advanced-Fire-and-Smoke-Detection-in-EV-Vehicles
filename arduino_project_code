@@ -1,0 +1,107 @@
+#include <SoftwareSerial.h>
+// --- CONFIGURATION ---
+const String PHONE_1 = "+91.........."; // Replace with your number
+const String PHONE_2 = "";               // Optional
+const String PHONE_3 = "";               // Optional
+
+// --- PIN DEFINITIONS ---
+#define rxPin 4
+#define txPin 3
+#define flame_sensor_pin 2
+#define buzzer_pin 5
+
+SoftwareSerial sim800L(rxPin, txPin);
+
+// --- STATE VARIABLES ---
+bool fire_flag = false;
+unsigned long lastCheckTime = 0;
+const int checkInterval = 100; // Check sensor every 100ms for responsiveness
+
+void setup() {
+  // Start Serial Monitor for debugging
+  Serial.begin(115200);
+  
+  // SIM800L default baud rate is usually 9600
+  sim800L.begin(9600);
+  
+  pinMode(flame_sensor_pin, INPUT);
+  pinMode(buzzer_pin, OUTPUT);
+  digitalWrite(buzzer_pin, LOW);
+  
+  Serial.println("EV Fire Monitor System Initializing...");
+  
+  // Handshake with SIM800L
+  delay(1000);
+  sim800L.println("AT"); 
+  delay(1000);
+  sim800L.println("AT+CMGF=1"); // Set SMS to Text Mode
+  delay(1000);
+  
+  Serial.println("System Ready. Monitoring Battery/Cabin...");
+}
+
+void loop() {
+  // Pass GSM responses to Serial Monitor
+  while (sim800L.available()) {
+    Serial.write(sim800L.read());
+  }
+
+  // Monitor sensor without using delay() to keep the system responsive
+  if (millis() - lastCheckTime >= checkInterval) {
+    int flame_value = digitalRead(flame_sensor_pin);
+    
+    // Flame sensors usually output LOW when fire is detected
+    if (flame_value == LOW) {
+      digitalWrite(buzzer_pin, HIGH);
+      
+      if (fire_flag == false) {
+        Serial.println("!!! CRITICAL ALERT: FIRE DETECTED !!!");
+        fire_flag = true; // Prevents re-sending SMS/Calls in a loop
+        send_multi_sms();
+        make_multi_call();
+      }
+    } 
+    else {
+      // Reset system when fire is cleared
+      digitalWrite(buzzer_pin, LOW);
+      fire_flag = false; 
+    }
+    lastCheckTime = millis();
+  }
+}
+
+// --- COMMUNICATION FUNCTIONS ---
+
+void send_multi_sms() {
+  String msg = "EV ALERT: Fire/Thermal event detected in your vehicle! Please check immediately.";
+  if (PHONE_1 != "") send_sms(msg, PHONE_1);
+  if (PHONE_2 != "") send_sms(msg, PHONE_2);
+  if (PHONE_3 != "") send_sms(msg, PHONE_3);
+}
+
+void make_multi_call() {
+  // Primary emergency call
+  if (PHONE_1 != "") {
+    make_call(PHONE_1);
+  }
+}
+
+void send_sms(String text, String phone) {
+  Serial.println("Sending SMS to: " + phone);
+  sim800L.print("AT+CMGF=1\r");
+  delay(500);
+  sim800L.print("AT+CMGS=\"" + phone + "\"\r");
+  delay(1000);
+  sim800L.print(text);
+  delay(100);
+  sim800L.write(0x1A); // ASCII code for Ctrl+Z to send
+  delay(5000); // Wait for module to finish sending
+}
+
+void make_call(String phone) {
+  Serial.println("Calling Emergency Contact: " + phone);
+  sim800L.println("ATD" + phone + ";"); // Start call
+  delay(20000); // Ring for 20 seconds
+  sim800L.println("ATH"); // Hang up
+  delay(1000);
+}
